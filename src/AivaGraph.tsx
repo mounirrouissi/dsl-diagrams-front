@@ -1,5 +1,6 @@
+// AivaGraph.tsx
 import React, { useState } from "react";
-import axios from "axios";
+import { parseScript } from "./http/api";
 import {
   ReactFlow,
   MiniMap,
@@ -7,136 +8,290 @@ import {
   Background,
   Node,
   Edge,
+  MarkerType,
+  useNodesState,
+  useEdgesState,
+  Handle,
+  Position,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-const initialNodes: Node[] = [
-  {
-    id: "S1",
-    data: {
-      label: (
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontWeight: "bold" }}>S1</div>
-          <div style={{ fontSize: "12px" }}>START</div>
-        </div>
-      ),
-    },
-    position: { x: 250, y: 0 },
-    type: "default",
-  },
-  {
-    id: "R1",
-    data: {
-      label: (
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontWeight: "bold" }}>R1</div>
-          <div style={{ fontSize: "12px" }}>VIP Path</div>
-        </div>
-      ),
-    },
-    position: { x: 100, y: 200 },
-    type: "default",
-  },
-  {
-    id: "R2",
-    data: {
-      label: (
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontWeight: "bold" }}>R2</div>
-          <div style={{ fontSize: "12px" }}>Regular Path</div>
-        </div>
-      ),
-    },
-    position: { x: 400, y: 200 },
-    type: "default",
-  },
-];
+// Custom Switch Node Component
+const SwitchNode = ({ data }: { data: any }) => {
+  return (
+    <div
+      style={{
+        background: "#fbbf24",
+        border: "2px solid #f59e0b",
+        borderRadius: "50%",
+        width: "80px",
+        height: "80px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        position: "relative",
+        boxShadow: "0 4px 8px rgba(0,0,0,0.2)",
+      }}
+    >
+      <Handle
+        type="target"
+        position={Position.Top}
+        style={{ background: "#555" }}
+      />
+      <div
+        style={{
+          textAlign: "center",
+          fontSize: "10px",
+          fontWeight: "bold",
+          color: "#92400e",
+          padding: "4px",
+          lineHeight: "1.1",
+        }}
+      >
+        <div>⚡</div>
+        <div>{data.functionName}</div>
+      </div>
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        style={{ background: "#555" }}
+      />
+    </div>
+  );
+};
 
-const initialEdges: Edge[] = [
-  {
-    id: "e-S1-R1",
-    source: "S1",
-    target: "R1",
-    label: "VIP",
-    animated: true,
-  },
-  {
-    id: "e-S1-R2",
-    source: "S1",
-    target: "R2",
-    label: "REG",
-    animated: true,
-  },
-];
+// Custom node types
+const nodeTypes = {
+  switch: SwitchNode,
+};
 
-// This function converts our backend's AST JSON into the format React Flow needs
-const transformAstToFlow = (ast: any) => {
-  const nodes: any[] = [];
-  const edges: any[] = [];
-  let yPos = 0;
+/**
+ * Defensive helpers to read state/action fields that backend may use
+ * slightly differently. The backend sample you posted had:
+ *  TrackNode[name=WelcomeTrack, states=[StateNode[trackName=S1, id=START, actions=[...]]]]
+ *
+ * So a state sometimes has:
+ *  - state.trackName === "S1"   (the state's id)
+ *  - state.id === "START"       (the state's type)
+ *
+ * We'll read both and fall back safely.
+ */
 
-  ast.forEach((stateNode: any) => {
-    // Collect action descriptions for display
-    const actionDescriptions = stateNode.actions.map((action: any) => {
-      if (action.function) {
-        return `SWITCH: ${action.function}`;
-      } else if (action.templateName) {
-        return `TEMPLATE: ${action.templateName}`;
-      } else if (action.targetStateId) {
-        return `GOTO: ${action.targetStateId}`;
-      }
-      return "Unknown Action";
-    });
+type RawTrack = {
+  name?: string;
+  id?: string;
+  states?: any[];
+};
 
-    // Each state becomes a node
-    nodes.push({
-      id: stateNode.id,
-      data: {
-        label: (
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontWeight: "bold" }}>{stateNode.id}</div>
-            {actionDescriptions.map((desc: string, index: number) => (
-              <div key={index} style={{ fontSize: "10px", margin: "2px 0" }}>
-                {desc}
-              </div>
-            ))}
-          </div>
-        ),
-      },
-      position: { x: 250, y: yPos },
-      type: "default",
-    });
+type RawState = {
+  // backend variant 1: (trackName=S1, id=START)
+  trackName?: string;
+  id?: string;
+  // other variant: (id=S1, type=START)
+  type?: string;
+  actions?: any[];
+};
 
-    yPos += 200; // space nodes out vertically
+const safeStateKey = (track: RawTrack, state: RawState) => {
+  // determine state name (S1) and state type (START)
+  const stateName =
+    // prefer the field that looks like an "S1" (starts with 'S' or 'R' frequently),
+    // fallback order based on observed backend shapes:
+    state.trackName ?? state.id ?? state.type ?? "UNKNOWN_STATE";
+  const stateType = state.type ?? state.id ?? "UNKNOWN_TYPE";
+  const trackName = track.name ?? track.id ?? "UNKNOWN_TRACK";
+  return { trackName, stateName, stateType };
+};
 
-    // Create edges based on action types
-    stateNode.actions.forEach((action: any) => {
-      // Handle GOTO actions
-      if (action.targetStateId) {
-        edges.push({
-          id: `e-${stateNode.id}-${action.targetStateId}`,
-          source: stateNode.id,
-          target: action.targetStateId,
-          animated: true,
-        });
-      }
+const transformAstToFlow = (tracks: RawTrack[]) => {
+  const nodes: Node[] = [];
+  const edges: Edge[] = [];
+  const nodeMap = new Map<string, Node>();
 
-      // Handle SWITCH actions (CALL_FUNCTION_SWITCH)
-      if (action.branches) {
-        for (const [label, targetId] of Object.entries(action.branches)) {
-          edges.push({
-            id: `e-${stateNode.id}-${targetId}-${label}`,
-            source: stateNode.id,
-            target: targetId,
-            label: label, // e.g., "VIP", "REG"
-            animated: true,
-          });
+  // First pass: create nodes for every state and switches
+  let baseY = 20;
+  const trackSpacingX = 420;
+  const stateSpacingY = 200;
+
+  tracks.forEach((track, ti) => {
+    const states = track.states ?? [];
+    states.forEach((st: RawState, si: number) => {
+      const { trackName, stateName, stateType } = safeStateKey(track, st);
+
+      const nodeId = `${trackName}:${stateName}`; // unique node id
+      const actionDescriptions: string[] = [];
+      let hasSwitchAction = false;
+      let switchFunction = "";
+
+      (st.actions ?? []).forEach((a: any) => {
+        // Check if this is a switch action
+        if (a.function && (a.branches || Object.keys(a.branches || {}).length > 0)) {
+          hasSwitchAction = true;
+          switchFunction = String(a.function).split(' ').pop() || String(a.function);
+        } else {
+          // Describe other actions for the node label
+          if (a.template) {
+            actionDescriptions.push(`TEMPLATE: ${String(a.template)}`);
+          } else if (a.templateName) {
+            actionDescriptions.push(`TEMPLATE: ${String(a.templateName)}`);
+          } else if (a.channel && a.from && a.to && a.template) {
+            actionDescriptions.push(`SEND: ${String(a.template)}`);
+          } else if ((a as any).phase) {
+            actionDescriptions.push(`PHASE: ${String(a.phase)}`);
+          } else if ((a as any).target) {
+            actionDescriptions.push(`GOTO: ${String(a.target)}`);
+          } else if (a.label && a.target) {
+            actionDescriptions.push(`BRANCH_LINE: ${String(a.label)}`);
+          } else if (!a.function) {
+            actionDescriptions.push("UNKNOWN_ACTION");
+          }
         }
+      });
+
+      // Create the main state node
+      const node: Node = {
+        id: nodeId,
+        data: {
+          label: (
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontWeight: "bold" }}>{stateName}</div>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>{stateType}</div>
+              {actionDescriptions.map((d, ix) => (
+                <div key={ix} style={{ fontSize: 10, marginTop: 4 }}>
+                  {d}
+                </div>
+              ))}
+            </div>
+          ),
+        },
+        position: { x: ti * trackSpacingX + 80, y: baseY + si * stateSpacingY },
+        type: "default",
+        style: { width: 220 },
+      };
+
+      nodeMap.set(nodeId, node);
+
+      // If there's a switch action, create a separate switch node
+      if (hasSwitchAction) {
+        const switchNodeId = `${nodeId}-switch`;
+        const switchNode: Node = {
+          id: switchNodeId,
+          data: {
+            functionName: switchFunction,
+          },
+          position: { 
+            x: ti * trackSpacingX + 150, 
+            y: baseY + si * stateSpacingY + 120 
+          },
+          type: "switch",
+        };
+        
+        nodeMap.set(switchNodeId, switchNode);
+        
+        // Add edge from state to switch
+        edges.push({
+          id: `e-${nodeId}-to-switch`,
+          source: nodeId,
+          target: switchNodeId,
+          animated: false,
+          type: "smoothstep",
+          markerEnd: { type: MarkerType.ArrowClosed },
+        } as Edge);
       }
     });
   });
 
-  return { nodes, edges };
+  // Second pass: create edges from actions
+  tracks.forEach((track) => {
+    const states = track.states ?? [];
+    states.forEach((st: RawState) => {
+      const { trackName, stateName } = safeStateKey(track, st);
+      const sourceId = `${trackName}:${stateName}`;
+
+      (st.actions ?? []).forEach((action: any, ai: number) => {
+        // GOTO (action.target)
+        if (action.target) {
+          // target may already be "Track:State" or just "S1"
+          const rawTarget: string = String(action.target);
+          const targetId = rawTarget.includes(":")
+            ? rawTarget
+            : `${trackName}:${rawTarget}`;
+          edges.push({
+            id: `e-${sourceId}-goto-${ai}-${targetId}`,
+            source: sourceId,
+            target: targetId,
+            label: "GOTO",
+            animated: false,
+            type: "smoothstep",
+            markerEnd: { type: MarkerType.ArrowClosed },
+          } as Edge);
+        }
+
+        // SwitchAction branches (action.branches is a map: label -> "Track:State")
+        if (action.branches && typeof action.branches === "object") {
+          Object.entries(action.branches).forEach(([lbl, tgt], idx) => {
+            const rawTarget = String(tgt);
+            const targetId = rawTarget.includes(":")
+              ? rawTarget
+              : `${trackName}:${rawTarget}`;
+            edges.push({
+              id: `e-${sourceId}-branch-${idx}-${lbl}`,
+              source: sourceId,
+              target: targetId,
+              label: lbl,
+              animated: true,
+              type: "smoothstep",
+              markerEnd: { type: MarkerType.ArrowClosed },
+            } as Edge);
+          });
+        }
+
+        // BranchAction (if backend left them) : { label, target }
+        if (action.label && action.target) {
+          const rawTarget = String(action.target);
+          const targetId = rawTarget.includes(":")
+            ? rawTarget
+            : `${trackName}:${rawTarget}`;
+          edges.push({
+            id: `e-${sourceId}-branchline-${ai}-${action.label}`,
+            source: sourceId,
+            target: targetId,
+            label: String(action.label),
+            animated: false,
+            type: "smoothstep",
+            markerEnd: { type: MarkerType.ArrowClosed },
+          } as Edge);
+        }
+      });
+    });
+  });
+
+  // Finally convert nodeMap to array and return
+  const finalNodes = Array.from(nodeMap.values());
+
+  // Simple layout improvement: spread branch targets horizontally around source nodes
+  // (Only reposition targets that already exist in nodeMap)
+  finalNodes.forEach((src) => {
+    const branchEdges = edges.filter(
+      (e) => e.source === src.id && e.label && e.label !== "GOTO"
+    );
+    if (branchEdges.length > 0) {
+      const spacing = 260;
+      const startX =
+        (src.position.x ?? 0) - ((branchEdges.length - 1) * spacing) / 2;
+      branchEdges.forEach((e, i) => {
+        const t = nodeMap.get(e.target as string);
+        if (t) {
+          t.position = {
+            x: startX + i * spacing,
+            y: (src.position.y ?? 0) + 180,
+          };
+        }
+      });
+    }
+  });
+
+  return { nodes: finalNodes, edges };
 };
 
 function AivaGraph() {
@@ -144,34 +299,34 @@ function AivaGraph() {
     `START_TRACK WelcomeTrack
 S1. START
     CALL_FUNCTION_SWITCH customerUtils findCustomerType -> @customerType
-        VIP   : R1
-        REG   : R2
+R1. FORD_0K_NEW_A_NRTA > GOTO FORD_0K_NRTA_1ST_TRACK:S1
 
-S2. R1
-    SEND_TEMPLATE vipGreeting
-    GOTO S3
+END_TRACK
 
-S3. R2
-    SEND_TEMPLATE regularGreeting`
+START_TRACK FORD_0K_NRTA_1ST_TRACK
+\tS1. START
+\t\tSENDMESSAGE SMS AGENT CUST $AN_FORD_0K_NRTA_1ST_TEMP
+\t\tMARK_LEAD_PHASE CONTACTED
+\tEND
+\tS1-R. START
+\t\tUNSCHEDULE CUST
+\t\tUNSCHEDULE SREP
+\t\tSWITCH_DIRECTION OUTBOUND
+\t\tMARK_LEAD_PHASE RESPONDED
+\t\tGOTO GENERIC_NRTA_1STTEXT_TRACK_RESPONSE_HANDLER:S1
+\tEND
+END_TRACK`
   );
 
-  const [nodes, setNodes] = useState(initialNodes);
-  const [edges, setEdges] = useState(initialEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [error, setError] = useState("");
 
   const generateGraph = async () => {
     try {
       setError("");
-      const response = await axios.post(
-        "http://localhost:8080/api/parse",
-        script,
-        {
-          headers: { "Content-Type": "text/plain" },
-        }
-      );
-      const { nodes: newNodes, edges: newEdges } = transformAstToFlow(
-        response.data
-      );
+      const ast = await parseScript(script); // expects TrackNode[]
+      const { nodes: newNodes, edges: newEdges } = transformAstToFlow(ast);
       setNodes(newNodes);
       setEdges(newEdges);
     } catch (err) {
@@ -186,37 +341,38 @@ S3. R2
         height: "100vh",
         width: "100%",
         display: "flex",
-        backgroundColor: "green",
+        backgroundColor: "#07101a",
       }}
     >
-      <div style={{ padding: 20, borderRight: "1px solid #ccc" }}>
-        <h2>AIVA Script</h2>
+      <div style={{ padding: 20, borderRight: "1px solid #ccc", width: 420 }}>
+        <h2 style={{ color: "white" }}>AIVA Script</h2>
         <textarea
           rows={20}
           cols={50}
           value={script}
           onChange={(e) => setScript(e.target.value)}
-          style={{ fontFamily: "monospace" }}
+          style={{ fontFamily: "monospace", width: "100%" }}
         />
         <br />
         <button onClick={generateGraph} style={{ marginTop: 10 }}>
           Generate Graph
         </button>
-        {error && <p style={{ color: "red" }}>{error}</p>}
+        {error && <p style={{ color: "tomato" }}>{error}</p>}
       </div>
-      <div
-        style={{
-          flex: 1,
-          width: "100%",
-          height: "100vh",
-          backgroundColor: "red",
-          minWidth: "400px",
-          minHeight: "400px",
-        }}
-      >
-        <p style={{ color: "white", padding: "10px" }}>ReactFlow Container</p>
+
+      <div style={{ flex: 1, position: "relative" }}>
+        <div style={{ padding: 10, color: "white" }}>ReactFlow Container</div>
         <div style={{ width: "100%", height: "calc(100% - 40px)" }}>
-          <ReactFlow nodes={nodes} edges={edges} fitView>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            fitView
+            nodesDraggable={true}
+            nodesConnectable={false}
+            elementsSelectable={true}
+          >
             <MiniMap />
             <Controls />
             <Background />
