@@ -1,100 +1,66 @@
-# dsl-diagrams
-app to convert dsl script into ui diagrams and vice versa 
 
+## Key Concepts
 
-### The Big Picture: A Blueprint for Language
+### React Flow
 
-Think of this file as a formal blueprint that describes a language's structure. It's written in ANTLR's own grammar syntax. The ANTLR tool reads this blueprint and automatically generates two Java classes for you:
+[React Flow](https://reactflow.dev/) is a React library for building node-based graphs and flowcharts. It provides a set of components and hooks for creating interactive diagrams.
 
-1.  **A Lexer (`AivaLexer.java`):** Its job is to break your raw script text into a sequence of "tokens" or words. It's like splitting an English sentence into nouns, verbs, and punctuation.
-2.  **A Parser (`AivaParser.java`):** Its job is to take the sequence of tokens from the Lexer and check if they form valid "sentences" according to the grammar rules. If they do, it creates a structured data object called a Parse Tree.
+-   **Nodes:** Represent individual elements in the flowchart (e.g., states, actions).
+-   **Edges:** Represent connections between nodes (e.g., transitions between states).
+-   **Layout:** React Flow provides automatic layouting, but we use custom positioning for more control.
+-   **Custom Nodes:**  The `SwitchNode` is a custom node type, demonstrating how to extend React Flow's basic functionality.
 
-This explanation will be split into the two main sections of the file: **Lexer Rules** and **Parser Rules**.
+### Data Transformation
 
----
+The `transformAstToFlow` function is a core part of the application. It transforms the structured data received from the backend (the AST) into the format required by React Flow. This involves:
 
-### Part 1: The Lexer Rules (The "Words")
+-   Creating nodes and edges based on the AIVA script's structure.
+-   Setting node positions and styles.
+-   Adding labels and tooltips for better understanding.
+-   Handling different types of actions and states.
+-   Interpreting the data to meet specific graph layout requirements.
 
-The Lexer's job is to define the vocabulary of your language. These rules are typically at the bottom of the file and written in all caps.
+### API Communication
 
-```antlr4
-// Lexer Rules (Tokens)
-IDENTIFIER: [a-zA-Z_@][a-zA-Z_0-9]*;
-WS: [ \t\r\n]+ -> skip; // Skip whitespace
-```
+The application uses `axios` to communicate with the backend API. The `parseScript` function in `src/http/api.js` sends the AIVA script to the `/api/parse` endpoint and receives the structured data in response.
 
-#### `IDENTIFIER`
-*   **`IDENTIFIER:`** This defines a new token type named `IDENTIFIER`.
-*   **`[a-zA-Z_@]`**: This is a regular expression that means "the first character *must* be a letter (lowercase or uppercase), an underscore, or an `@` symbol." This is why names like `S1`, `customerUtils`, and `@customerType` are all valid.
-*   **`[a-zA-Z_0-9]*`**: This means "after the first character, you can have *zero or more* characters that are letters, underscores, or numbers."
-*   **In simple terms:** An `IDENTIFIER` is any word that starts with a letter, underscore, or `@`, and is followed by any combination of letters, numbers, or underscores.
-*   **Examples of `IDENTIFIER`s:** `S1`, `START`, `WelcomeTrack`, `customerUtils`, `@customerType`, `vipGreeting`.
+## Backend Integration
 
-#### `WS` (Whitespace)
-*   **`WS:`**: This defines a token for whitespace.
-*   **`[ \t\r\n]+`**: This regular expression means "match one or more (`+`) characters that are a space (` `), a tab (`\t`), a carriage return (`\r`), or a newline (`\n`)."
-*   **`-> skip`**: This is a special ANTLR command. It tells the Lexer, "If you find this pattern, don't create a token for it. Just throw it away and move on." This is incredibly important because it means the formatting of your script (extra spaces, new lines) doesn't affect the parsing logic at all.
+This frontend is designed to work with a Java Spring Boot backend that parses AIVA scripts.
 
----
+-   **API Endpoint:** The frontend sends POST requests to the `/api/parse` endpoint with the script in the request body.
+-   **CORS:** The backend must enable Cross-Origin Resource Sharing (CORS) to allow requests from `http://localhost:3000`.
+-   **Data Format:** The backend should return a JSON array of `TrackNode` objects, representing the parsed AIVA script.
 
-### Part 2: The Parser Rules (The "Sentences")
+## Customization
 
-The Parser rules define the grammar—how you can combine the "words" (tokens) into valid structures. These are typically at the top and written in lowercase.
+-   **Node Styles:** Customize the appearance of nodes by modifying the `style` property in the `transformAstToFlow` function.
+-   **Edge Styles:** Customize the appearance of edges by modifying the `style` property in the `transformAstToFlow` function.
+-   **Layout:** Adjust the `position` property of nodes in the `transformAstToFlow` function to change the layout of the flowchart.
+-   **Node Types:** Create custom node types to represent different elements in the AIVA script (see the `SwitchNode` example).
 
-Let's go through them from the top down, from the biggest structure to the smallest.
+## Troubleshooting
 
-#### `script`
-```antlr4
-script: track;
-```
-*   This is the entry point, the top-level rule. It says: "A valid `script` consists of exactly one `track`."
+-   **Graph Not Displaying:**
+    -   Check if the backend server is running and accessible.
+    -   Verify that the `/api/parse` endpoint is functioning correctly.
+    -   Inspect the browser console for error messages.
+-   **Incorrect Layout:**
+    -   Review the `transformAstToFlow` function for issues in node positioning.
+    -   Ensure that the backend is returning the correct data structure.
+-   **CORS Errors:**
+    -   Make sure the backend has CORS enabled for `http://localhost:3000`.
 
-#### `track`
-```antlr4
-track: 'START_TRACK' IDENTIFIER state+ 'END_TRACK'?;
-```
-*   This rule defines a `track`. It must be a precise sequence:
-    1.  `'START_TRACK'`: The literal text `START_TRACK`. These are implicit tokens defined by the literal text in quotes.
-    2.  `IDENTIFIER`: A token for the track's name (e.g., `WelcomeTrack`).
-    3.  `state+`: One or more (`+`) instances of the `state` rule. This is why a track must have at least one state.
-    4.  `'END_TRACK'?`: The literal text `END_TRACK`. The question mark (`?`) means this part is **optional** (it can appear zero or one time).
+## Contributing
 
-#### `state`
-```antlr4
-state: IDENTIFIER '.' IDENTIFIER action+;
-```
-*   This rule defines a `state`. It's a sequence of:
-    1.  `IDENTIFIER`: The state's ID (e.g., `S1`).
-    2.  `'.'`: A literal dot character.
-    3.  `IDENTIFIER`: The state's type (e.g., `START`).
-    4.  `action+`: One or more (`+`) instances of the `action` rule. A state is not valid unless it has at least one action.
+Contributions are welcome! To contribute to this project, please follow these steps:
 
-#### `action`
-```antlr4
-action:
-    'CALL_FUNCTION_SWITCH' IDENTIFIER IDENTIFIER '->' IDENTIFIER branch+
-    | 'SEND_TEMPLATE' IDENTIFIER
-    | 'GOTO' IDENTIFIER;
-```
-*   This rule defines an `action`. The pipe character (`|`) means **OR**. An action can be one of three possible patterns:
-    1.  **Pattern 1 (SWITCH):** The literal text `'CALL_FUNCTION_SWITCH'`, followed by four `IDENTIFIER`s (e.g., `customerUtils`, `findCustomerType`, `->`, `@customerType`), followed by one or more `branch`es.
-    2.  **Pattern 2 (SEND):** The literal text `'SEND_TEMPLATE'`, followed by one `IDENTIFIER` (e.g., `vipGreeting`).
-    3.  **Pattern 3 (GOTO):** The literal text `'GOTO'`, followed by one `IDENTIFIER` (e.g., `S3`).
+1.  Fork the repository.
+2.  Create a new branch for your feature or bug fix.
+3.  Make your changes and commit them with descriptive messages.
+4.  Push your changes to your forked repository.
+5.  Submit a pull request.
 
-#### `branch`
-```antlr4
-branch: IDENTIFIER ':' IDENTIFIER;
-```
-*   This is the smallest building block. It defines a `branch` inside a SWITCH action. It is simply:
-    1.  `IDENTIFIER`: The case label (e.g., `VIP`).
-    2.  `':'`: A literal colon character.
-    3.  `IDENTIFIER`: The target state ID (e.g., `R1`).
+## License
 
-### Summary: How It All Works Together
-
-When you give the generated parser your script:
-1.  The **Lexer** scans the text `S1. START SEND_TEMPLATE vipGreeting`. It ignores the whitespace and produces a list of tokens: `[IDENTIFIER('S1'), '.', IDENTIFIER('START'), 'SEND_TEMPLATE', IDENTIFIER('vipGreeting')]`.
-2.  The **Parser** takes this token list. It tries to match the `script` rule. To do that, it needs to match a `track`, which needs to match a `state`.
-3.  The Parser sees `IDENTIFIER`, `.`, `IDENTIFIER` which matches the first part of the `state` rule.
-4.  It then looks for an `action`. It sees `'SEND_TEMPLATE'` followed by `IDENTIFIER`. It checks the `action` rule and finds that this perfectly matches the second pattern (`'SEND_TEMPLATE' IDENTIFIER`).
-5.  Because all the tokens fit the grammar rules, the parser succeeds and builds a Parse Tree, which you then walk in your controller to build your custom data structure (the AST).
+This project is licensed under the [MIT License](LICENSE).
