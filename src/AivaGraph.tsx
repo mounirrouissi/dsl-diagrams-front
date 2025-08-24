@@ -108,6 +108,9 @@ const transformAstToFlow = (tracks: RawTrack[]) => {
   const edges: Edge[] = [];
   const nodeMap = new Map<string, Node>();
 
+  // Determine parent track (first track is usually the parent)
+  const parentTrackName = tracks[0]?.name || tracks[0]?.id || "WelcomeTrack";
+
   // First pass: create nodes for every state and switches
   let baseY = 20;
   const trackSpacingX = 420;
@@ -115,6 +118,21 @@ const transformAstToFlow = (tracks: RawTrack[]) => {
 
   tracks.forEach((track, ti) => {
     const states = track.states ?? [];
+    const isParentTrack = (track.name || track.id) === parentTrackName;
+
+    // Color scheme based on track type
+    const trackColors = isParentTrack
+      ? {
+          background: "#dbeafe",
+          border: "#3b82f6",
+          textColor: "#1e40af",
+        }
+      : {
+          background: "#dcfce7",
+          border: "#22c55e",
+          textColor: "#15803d",
+        };
+
     states.forEach((st: RawState, si: number) => {
       const { trackName, stateName, stateType } = safeStateKey(track, st);
 
@@ -122,12 +140,18 @@ const transformAstToFlow = (tracks: RawTrack[]) => {
       const actionDescriptions: string[] = [];
       let hasSwitchAction = false;
       let switchFunction = "";
+      const isReactionState =
+        stateName.includes("-R") || stateName.endsWith("R");
 
       (st.actions ?? []).forEach((a: any) => {
         // Check if this is a switch action
-        if (a.function && (a.branches || Object.keys(a.branches || {}).length > 0)) {
+        if (
+          a.function &&
+          (a.branches || Object.keys(a.branches || {}).length > 0)
+        ) {
           hasSwitchAction = true;
-          switchFunction = String(a.function).split(' ').pop() || String(a.function);
+          switchFunction =
+            String(a.function).split(" ").pop() || String(a.function);
         } else {
           // Describe other actions for the node label
           if (a.template) {
@@ -148,28 +172,97 @@ const transformAstToFlow = (tracks: RawTrack[]) => {
         }
       });
 
-      // Create the main state node
+      // Position calculation - reaction states are positioned to the right of their parent
+      let nodeX = ti * trackSpacingX + 80;
+      let nodeY = baseY + si * stateSpacingY;
+
+      if (isReactionState) {
+        // Position reaction state to the right of its parent state
+        const parentStateName = stateName.replace("-R", "").replace("R", "");
+        nodeX += 280; // Offset to the right
+        nodeY -= 100; // Slightly higher to show connection
+      }
+
+      // Create the main state node with track-specific colors
       const node: Node = {
         id: nodeId,
         data: {
           label: (
             <div style={{ textAlign: "center" }}>
-              <div style={{ fontWeight: "bold" }}>{stateName}</div>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>{stateType}</div>
+              <div
+                style={{
+                  fontWeight: "bold",
+                  color: trackColors.textColor,
+                  fontSize: isReactionState ? "11px" : "14px",
+                }}
+              >
+                {stateName}
+                {isReactionState && " 🔄"}
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  opacity: 0.8,
+                  color: trackColors.textColor,
+                }}
+              >
+                {stateType}
+              </div>
               {actionDescriptions.map((d, ix) => (
-                <div key={ix} style={{ fontSize: 10, marginTop: 4 }}>
+                <div
+                  key={ix}
+                  style={{
+                    fontSize: 9,
+                    marginTop: 2,
+                    color: trackColors.textColor,
+                    opacity: 0.8,
+                  }}
+                >
                   {d}
                 </div>
               ))}
             </div>
           ),
         },
-        position: { x: ti * trackSpacingX + 80, y: baseY + si * stateSpacingY },
+        position: { x: nodeX, y: nodeY },
         type: "default",
-        style: { width: 220 },
+        style: {
+          width: isReactionState ? 200 : 220,
+          background: isReactionState ? "#fef3c7" : trackColors.background,
+          border: `2px solid ${
+            isReactionState ? "#f59e0b" : trackColors.border
+          }`,
+          borderRadius: "8px",
+          boxShadow: isReactionState
+            ? "0 2px 8px rgba(245, 158, 11, 0.3)"
+            : "0 2px 4px rgba(0,0,0,0.1)",
+        },
       };
 
       nodeMap.set(nodeId, node);
+
+      // If this is a reaction state, connect it to its parent state
+      if (isReactionState) {
+        const parentStateName = stateName.replace("-R", "").replace("R", "");
+        const parentNodeId = `${trackName}:${parentStateName}`;
+
+        if (nodeMap.has(parentNodeId) || parentStateName !== stateName) {
+          edges.push({
+            id: `e-${parentNodeId}-reaction-${nodeId}`,
+            source: parentNodeId,
+            target: nodeId,
+            label: "reaction",
+            animated: true,
+            type: "smoothstep",
+            markerEnd: { type: MarkerType.ArrowClosed },
+            style: {
+              stroke: "#f59e0b",
+              strokeWidth: 2,
+              strokeDasharray: "5,5",
+            },
+          } as Edge);
+        }
+      }
 
       // If there's a switch action, create a separate switch node
       if (hasSwitchAction) {
@@ -179,15 +272,15 @@ const transformAstToFlow = (tracks: RawTrack[]) => {
           data: {
             functionName: switchFunction,
           },
-          position: { 
-            x: ti * trackSpacingX + 150, 
-            y: baseY + si * stateSpacingY + 120 
+          position: {
+            x: nodeX + 70,
+            y: nodeY + 120,
           },
           type: "switch",
         };
-        
+
         nodeMap.set(switchNodeId, switchNode);
-        
+
         // Add edge from state to switch
         edges.push({
           id: `e-${nodeId}-to-switch`,
@@ -207,11 +300,11 @@ const transformAstToFlow = (tracks: RawTrack[]) => {
     states.forEach((st: RawState) => {
       const { trackName, stateName } = safeStateKey(track, st);
       const sourceId = `${trackName}:${stateName}`;
+      const switchNodeId = `${sourceId}-switch`;
 
       (st.actions ?? []).forEach((action: any, ai: number) => {
-        // GOTO (action.target)
-        if (action.target) {
-          // target may already be "Track:State" or just "S1"
+        // GOTO (action.target) - from regular state node
+        if (action.target && !action.function) {
           const rawTarget: string = String(action.target);
           const targetId = rawTarget.includes(":")
             ? rawTarget
@@ -227,21 +320,26 @@ const transformAstToFlow = (tracks: RawTrack[]) => {
           } as Edge);
         }
 
-        // SwitchAction branches (action.branches is a map: label -> "Track:State")
-        if (action.branches && typeof action.branches === "object") {
+        // SwitchAction branches - from switch node to targets
+        if (
+          action.function &&
+          action.branches &&
+          typeof action.branches === "object"
+        ) {
           Object.entries(action.branches).forEach(([lbl, tgt], idx) => {
             const rawTarget = String(tgt);
             const targetId = rawTarget.includes(":")
               ? rawTarget
               : `${trackName}:${rawTarget}`;
             edges.push({
-              id: `e-${sourceId}-branch-${idx}-${lbl}`,
-              source: sourceId,
+              id: `e-${switchNodeId}-branch-${idx}-${lbl}`,
+              source: switchNodeId,
               target: targetId,
               label: lbl,
               animated: true,
               type: "smoothstep",
               markerEnd: { type: MarkerType.ArrowClosed },
+              style: { stroke: "#f59e0b", strokeWidth: 2 },
             } as Edge);
           });
         }
@@ -368,6 +466,7 @@ END_TRACK`
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            nodeTypes={nodeTypes}
             fitView
             nodesDraggable={true}
             nodesConnectable={false}
