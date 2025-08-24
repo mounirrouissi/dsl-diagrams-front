@@ -235,8 +235,28 @@ const transformAstToFlow = (tracks: RawTrack[]) => {
             (a.branches || Object.keys(a.branches || {}).length > 0)
           ) {
             hasSwitchInTrack = true;
+
+            // Extract targets from switch branches
+            if (a.branches && typeof a.branches === "object") {
+              Object.values(a.branches).forEach((target: any) => {
+                const targetStr = String(target);
+                if (targetStr.includes(":")) {
+                  const targetTrack = targetStr.split(":")[0];
+                  if (!gotoTargets.includes(targetTrack)) {
+                    gotoTargets.push(targetTrack);
+                  }
+                }
+              });
+            }
           }
           if (a.target && a.target.includes(":")) {
+            const targetTrack = a.target.split(":")[0];
+            if (!gotoTargets.includes(targetTrack)) {
+              gotoTargets.push(targetTrack);
+            }
+          }
+          // Also check for BranchAction targets (R1, R2 lines)
+          if (a.label && a.target && a.target.includes(":")) {
             const targetTrack = a.target.split(":")[0];
             if (!gotoTargets.includes(targetTrack)) {
               gotoTargets.push(targetTrack);
@@ -280,8 +300,17 @@ const transformAstToFlow = (tracks: RawTrack[]) => {
   });
 
   // Connect switch to target tracks
-  if (switchNodeCreated && switchTargets.length > 0) {
-    switchTargets.forEach((targetTrack, idx) => {
+  if (switchNodeCreated) {
+    // WORKAROUND: Since backend isn't properly linking branches,
+    // connect to all child tracks (non-parent tracks)
+    const childTracks = tracks
+      .filter((t) => (t.name || t.id) !== parentTrackName)
+      .map((t) => t.name || t.id || "UNKNOWN");
+
+    const targetsToConnect =
+      switchTargets.length > 0 ? switchTargets : childTracks;
+
+    targetsToConnect.forEach((targetTrack, idx) => {
       if (nodeMap.has(targetTrack)) {
         edges.push({
           id: `e-decision-switch-to-${targetTrack}`,
@@ -295,6 +324,11 @@ const transformAstToFlow = (tracks: RawTrack[]) => {
         } as Edge);
       }
     });
+
+    // Update switchTargets for positioning
+    if (switchTargets.length === 0) {
+      switchTargets = childTracks;
+    }
   }
 
   // Position child tracks in a fan pattern around the switch
@@ -340,6 +374,7 @@ function AivaGraph() {
 S1. START
     CALL_FUNCTION_SWITCH customerUtils findCustomerType -> @customerType
 R1. FORD_0K_NEW_A_NRTA > GOTO FORD_0K_NRTA_1ST_TRACK:S1
+R2. FORD_5K_NEW_A_NRTA > GOTO FORD_5K_NEW_NRTA_1ST_TRACK:S1
 
 END_TRACK
 
@@ -347,6 +382,21 @@ START_TRACK FORD_0K_NRTA_1ST_TRACK
 \tS1. START
 \t\tSENDMESSAGE SMS AGENT CUST $AN_FORD_0K_NRTA_1ST_TEMP
 \t\tMARK_LEAD_PHASE CONTACTED
+\tEND
+\tS1-R. START
+\t\tUNSCHEDULE CUST
+\t\tUNSCHEDULE SREP
+\t\tSWITCH_DIRECTION OUTBOUND
+\t\tMARK_LEAD_PHASE RESPONDED
+\t\tGOTO GENERIC_NRTA_1STTEXT_TRACK_RESPONSE_HANDLER:S1
+\tEND
+END_TRACK
+
+START_TRACK FORD_5K_NEW_NRTA_1ST_TRACK
+\tS1. START
+\t\tSENDMESSAGE SMS AGENT CUST $AN_FORD_5K_NEW_NRTA_1ST_TEMP
+\t\tMARK_LEAD_PHASE CONTACTED
+\t\tSCHEDULE_FOLLOWUP RELDAY:1 ABSTIME:09:57:am GENERIC_AN_FIRSTSERVICE_NRTA_1ST_NRAA_TRACK_V1:S1
 \tEND
 \tS1-R. START
 \t\tUNSCHEDULE CUST
@@ -366,7 +416,21 @@ END_TRACK`
     try {
       setError("");
       const ast = await parseScript(script); // expects TrackNode[]
+      console.log("Backend AST:", JSON.stringify(ast, null, 2));
       const { nodes: newNodes, edges: newEdges } = transformAstToFlow(ast);
+      console.log(
+        "Generated nodes:",
+        newNodes.map((n) => ({ id: n.id, type: n.type }))
+      );
+      console.log(
+        "Generated edges:",
+        newEdges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          label: e.label,
+        }))
+      );
       setNodes(newNodes);
       setEdges(newEdges);
     } catch (err) {
