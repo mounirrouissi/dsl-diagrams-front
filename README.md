@@ -29,7 +29,7 @@ The application uses `axios` to communicate with the backend API. The `parseScri
 This frontend is designed to work with a Java Spring Boot backend that parses AIVA scripts.
 
 -   **API Endpoint:** The frontend sends POST requests to the `/api/parse` endpoint with the script in the request body.
--   **CORS:** The backend must enable Cross-Origin Resource Sharing (CORS) to allow requests from `http://localhost:3000`.
+-   **CORS:** The backend must enable Cross-Origin Resource Sharing (CORS) to allow requests from `http://localhost:5173`.
 -   **Data Format:** The backend should return a JSON array of `TrackNode` objects, representing the parsed AIVA script.
 
 ## Customization
