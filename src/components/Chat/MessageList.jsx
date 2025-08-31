@@ -10,24 +10,31 @@ const MessageList = ({ messages, onQuickReply }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+
+
+  console.log('MessageList rendering with', messages.length, 'messages');
+  
   return (
-    <div className="message-list">
-      {messages.map((message, index) => (
-        <div key={message.id} className="message-wrapper">
-          <MessageBubble message={message} />
-          
-          {/* Show quick replies for the last bot message */}
-          {message.sender === 'bot' && 
-           message.quickReplies && 
-           message.quickReplies.length > 0 && 
-           index === messages.length - 1 && (
-            <QuickReplies 
-              replies={message.quickReplies}
-              onReplyClick={onQuickReply}
-            />
-          )}
-        </div>
-      ))}
+    <div className="message-list" style={{background: 'lightgray', minHeight: '200px', padding: '10px'}}>
+      {messages.map((message, index) => {
+        console.log(`Rendering message ${index}:`, message);
+        return (
+          <div key={`${message.id}-${index}`} className="message-wrapper">
+            <MessageBubble message={message} />
+            
+            {/* Show quick replies for the last bot message */}
+            {message.sender === 'bot' && 
+             message.quickReplies && 
+             message.quickReplies.length > 0 && 
+             index === messages.length - 1 && (
+              <QuickReplies 
+                replies={message.quickReplies}
+                onReplyClick={onQuickReply}
+              />
+            )}
+          </div>
+        );
+      })}
       <div ref={messagesEndRef} />
     </div>
   );
