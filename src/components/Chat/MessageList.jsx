@@ -15,7 +15,7 @@ const MessageList = ({ messages, onQuickReply }) => {
   console.log('MessageList rendering with', messages.length, 'messages');
   
   return (
-    <div className="message-list" style={{background: 'lightgray', minHeight: '200px', padding: '10px'}}>
+    <div className="message-list">
       {messages.map((message, index) => {
         console.log(`Rendering message ${index}:`, message);
         return (
