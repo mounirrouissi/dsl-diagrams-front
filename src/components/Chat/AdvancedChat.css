@@ -205,6 +205,13 @@
     font-weight: bold;
 }
 
+.processing-method {
+    font-size: 10px;
+    color: #666;
+    margin-left: 8px;
+    font-style: italic;
+}
+
 .typing-indicator {
     display: flex;
     align-items: center;
