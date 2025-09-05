@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import "./AdvancedChat.css";
 
-const AdvancedChatInterface = () => {
+const AdvancedChatInterface = ({ initialContext = null }) => {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState("");
   const [sessionId, setSessionId] = useState(null);
@@ -12,16 +12,74 @@ const AdvancedChatInterface = () => {
   const API_BASE_URL = "http://localhost:8080/api/chat";
 
   useEffect(() => {
-    // Initialize with welcome message
-    addMessage({
-      text: "Hello! I'm your advanced auto service assistant. I can help with vehicle maintenance, service bookings, and answer questions about your car. What's your name?",
-      sender: "bot",
-      timestamp: new Date(),
-      intent: "greeting",
-      confidence: 1.0,
-      sentiment: "positive",
-    });
-  }, []);
+    // Initialize context from channel simulator if provided
+    if (initialContext) {
+      const mappedContext = {
+        customerName: initialContext.customerInfo?.name || initialContext.customerName,
+        customerId: initialContext.customerInfo?.customerId || initialContext.customerId,
+        vehicle: initialContext.customerInfo?.vehicle || initialContext.vehicle,
+        channel: initialContext.channel,
+      };
+      setContext(mappedContext);
+      
+      // Generate session ID
+      const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+      setSessionId(newSessionId);
+      
+      // Create channel-specific welcome message
+      const vehicleDisplay = mappedContext.vehicle 
+        ? (typeof mappedContext.vehicle === 'string' 
+            ? mappedContext.vehicle 
+            : `${mappedContext.vehicle.year || ''} ${mappedContext.vehicle.make || ''} ${mappedContext.vehicle.model || ''}`.trim())
+        : "vehicle";
+
+      let welcomeText;
+      switch (initialContext.channel) {
+        case "sms":
+          welcomeText = `Hi ${mappedContext.customerName}! I received your text message. I'm your advanced auto service assistant and I'm here to help you with your ${vehicleDisplay}. Let me assist you right away.`;
+          break;
+        case "email":
+          welcomeText = `Hello ${mappedContext.customerName}, thank you for your email${
+            initialContext.subject ? ` regarding "${initialContext.subject}"` : ""
+          }. I'm your advanced auto service assistant and I'll help you with your inquiry about your ${vehicleDisplay}.`;
+          break;
+        default:
+          welcomeText = `Hello ${mappedContext.customerName}! I'm your advanced auto service assistant. I'm here to help you with your ${vehicleDisplay}.`;
+      }
+
+      addMessage({
+        text: welcomeText,
+        sender: "bot",
+        timestamp: new Date(),
+        intent: "greeting",
+        confidence: 1.0,
+        sentiment: "positive",
+      });
+
+      // If there's an initial message, process it
+      if (initialContext.initialMessage) {
+        setTimeout(() => {
+          addMessage({
+            text: initialContext.initialMessage,
+            sender: "user",
+            timestamp: new Date(),
+          });
+          setInputMessage(initialContext.initialMessage);
+          setTimeout(() => sendMessage(), 100);
+        }, 500);
+      }
+    } else {
+      // Default welcome message
+      addMessage({
+        text: "Hello! I'm your advanced auto service assistant. I can help with vehicle maintenance, service bookings, and answer questions about your car. What's your name?",
+        sender: "bot",
+        timestamp: new Date(),
+        intent: "greeting",
+        confidence: 1.0,
+        sentiment: "positive",
+      });
+    }
+  }, [initialContext]);
 
   useEffect(() => {
     scrollToBottom();

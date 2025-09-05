@@ -73,14 +73,11 @@ const ChatContainer = ({ initialContext = null }) => {
         // Add bot response to chat
         const botMessage = {
           id: Date.now() + 1,
-          text: response.message || "Test response message",
+          text: response.message || "I'm here to help with your automotive needs. How can I assist you?",
           sender: "bot",
           timestamp: new Date().toISOString(),
           intent: response.intent,
-          quickReplies: response.quickReplies || [
-            { text: "Test Reply 1", label: "Test Reply 1" },
-            { text: "Test Reply 2", label: "Test Reply 2" }
-          ],
+          quickReplies: response.quickReplies || [],
         };
 
         console.log('Bot message to add:', botMessage);
