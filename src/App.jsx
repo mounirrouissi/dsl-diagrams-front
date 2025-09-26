@@ -1,10 +1,10 @@
-import React, { useState } from "react";
+import { useState } from "react";
+import AivaGraph from "./AivaGraph";
 import "./App.css";
 import ChannelSimulator from "./components/ChannelSimulator/ChannelSimulator";
 import AdvancedChatInterface from "./components/Chat/AdvancedChatInterface";
-
 function App() {
-  const [currentView, setCurrentView] = useState("simulator"); // 'simulator', 'chat', 'graph', 'advanced-chat', or 'nlp-demo'
+  const [currentView, setCurrentView] = useState("graph"); // 'simulator', 'chat', 'graph', 'advanced-chat', or 'nlp-demo'
   const [chatContext, setChatContext] = useState(null);
 
   const handleStartChat = (context) => {
@@ -15,6 +15,11 @@ function App() {
   const handleBackToSimulator = () => {
     setChatContext(null);
     setCurrentView("simulator");
+  };
+
+  const handleBackToGraph = () => {
+    setChatContext(null);
+    setCurrentView("graph");
   };
 
   return (
@@ -56,6 +61,20 @@ function App() {
         >
           🤖 Advanced Auto Assistant
         </button>
+        <button
+          onClick={() => setCurrentView("graph")}
+          style={{
+            padding: "8px 16px",
+            background: currentView === "chat" ? "#2563eb" : "white",
+            color: currentView === "chat" ? "white" : "#2563eb",
+            border: "1px solid #2563eb",
+            borderRadius: "4px",
+            cursor: "pointer",
+          }}
+        >
+          Graph
+        </button>
+
 
         {currentView === "chat" && chatContext && (
           <div
@@ -69,9 +88,9 @@ function App() {
             <span style={{ fontSize: "14px", color: "#6b7280" }}>
               {chatContext.channel === "sms" ? "📱" : "📧"}{" "}
               {chatContext.customerInfo.name} | {
-                typeof chatContext.customerInfo.vehicle === 'string' 
+                typeof chatContext.customerInfo.vehicle === 'string'
                   ? chatContext.customerInfo.vehicle
-                  : chatContext.customerInfo.vehicle 
+                  : chatContext.customerInfo.vehicle
                     ? `${chatContext.customerInfo.vehicle.year || ''} ${chatContext.customerInfo.vehicle.make || ''} ${chatContext.customerInfo.vehicle.model || ''}`.trim()
                     : 'Vehicle'
               }
@@ -88,6 +107,19 @@ function App() {
               }}
             >
               ← Back to Simulator
+            </button>
+            <button
+              onClick={handleBackToGraph}
+              style={{
+                padding: "6px 12px",
+                background: "#f3f4f6",
+                border: "1px solid #d1d5db",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "12px",
+              }}
+            >
+              ← Back to Graph
             </button>
           </div>
         )}
